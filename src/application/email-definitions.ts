@@ -36,6 +36,32 @@ const departmentManagerInvitation: EmailDefinition<
   }),
 };
 
+const reporterInvitationSchema = z.object({
+  organizationName: z.string().min(1),
+  departmentName: z.string().min(1),
+  // Quien invitó: el admin o el jefe del departamento
+  inviterName: z.string().min(1),
+  acceptUrl: z.url(),
+  expiresAt: z.iso.datetime(),
+});
+
+const reporterInvitation: EmailDefinition<z.infer<typeof reporterInvitationSchema>> = {
+  dataSchema: reporterInvitationSchema,
+  subject: ({ organizationName }) => `${organizationName} te invita a reportar tus gastos`,
+  variables: (
+    recipientName,
+    { organizationName, departmentName, inviterName, acceptUrl, expiresAt },
+  ) => ({
+    recipientName,
+    organizationName,
+    departmentName,
+    inviterName,
+    acceptUrl,
+    expiration: formatDate(expiresAt),
+  }),
+};
+
 export const EMAIL_DEFINITIONS: Record<string, EmailDefinition<any>> = {
   'department-manager-invitation': departmentManagerInvitation,
+  'reporter-invitation': reporterInvitation,
 };
