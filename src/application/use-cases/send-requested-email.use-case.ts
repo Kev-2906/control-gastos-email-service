@@ -1,4 +1,4 @@
-import { EMAIL_DEFINITIONS } from '../email-definitions';
+import { EMAIL_DEFINITIONS } from '../emails/email-definitions';
 import { emailRequestSchema } from '../email-request.schema';
 import { PermanentEmailError } from '../errors/permanent-email.error';
 import { EmailSenderPort } from '../ports/email-sender.port';
