@@ -44,7 +44,7 @@ export class EmailRequestsConsumer {
   async handle(message: unknown, amqpMessage: IncomingAmqpMessage): Promise<Nack | void> {
     const messageId = String(amqpMessage.properties.messageId ?? 'without-id');
     const type = amqpMessage.fields.routingKey;
-    const deliveryCount = Number(amqpMessage.properties.headers?.['x-delivery-count'] ?? 0);
+    const deliveryCount = Number(amqpMessage.properties.headers?.['x-acquired-count'] ?? 0);
 
     try {
       await this.sendRequestedEmail.execute(message);
