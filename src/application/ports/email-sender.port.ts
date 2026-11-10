@@ -2,7 +2,7 @@ export interface OutgoingEmail {
   to: { email: string; name: string };
   subject: string;
   template: string;
-  variables: Record<string, string>;
+  variables: Record<string, unknown>;
 }
 
 export interface EmailSenderPort {
