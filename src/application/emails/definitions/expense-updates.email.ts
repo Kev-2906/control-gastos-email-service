@@ -13,6 +13,7 @@ const EXPENSE_UPDATE_TYPES = [
   'expense_send_failed',
   'expense_send_delayed',
   'expense_send_stuck',
+  'expense_commented',
 ] as const;
 
 const GENERAL_UPDATE_TYPES = [
@@ -33,11 +34,18 @@ const STATUSES = [
 ] as const;
 
 type UpdateType = (typeof EXPENSE_UPDATE_TYPES)[number] | (typeof GENERAL_UPDATE_TYPES)[number];
+type UpdatesScope = 'expense' | 'expenses' | 'portal';
 type Status = (typeof STATUSES)[number];
 
 const WITHOUT_DESCRIPTION = 'sin descripción';
 const RETRIES_EXHAUSTED_CODE = 'ODOO_RETRIES_EXHAUSTED';
 const COMPANY_ACCOUNT = 'company_account';
+
+const HEADINGS: Record<UpdatesScope, string> = {
+  expense: 'Novedades de tu gasto',
+  expenses: 'Novedades de tus gastos',
+  portal: 'Novedades del Portal de Gastos',
+};
 
 const BLOCKED_ACTIONS_FOR_ACTOR: Record<string, string> = {
   status_refresh: 'actualizar tus gastos desde Odoo',
@@ -46,6 +54,8 @@ const BLOCKED_ACTIONS_FOR_ACTOR: Record<string, string> = {
   reporter_invitation: 'enviar la invitación',
   initial_sync: 'reintentar la sincronización con Odoo',
   catalog_refresh: 'actualizar los catálogos de Odoo',
+  expense_comment: 'publicar tu comentario en Odoo',
+  expense_comment_change: 'editar o eliminar tu comentario en Odoo',
 };
 
 const BLOCKED_ACTIONS_FOR_ADMIN: Record<string, string> = {
@@ -55,10 +65,13 @@ const BLOCKED_ACTIONS_FOR_ADMIN: Record<string, string> = {
   reporter_invitation: 'invitar a un reportante',
   initial_sync: 'reintentar la sincronización',
   catalog_refresh: 'actualizar los catálogos',
+  expense_comment: 'comentar un gasto',
+  expense_comment_change: 'editar o eliminar un comentario',
 };
 
 const expenseUpdateSchema = z.object({
   type: z.enum([...EXPENSE_UPDATE_TYPES, ...GENERAL_UPDATE_TYPES]),
+  expenseId: z.string().nullish(),
   status: z.enum(STATUSES).nullish(),
   expenseDescription: z.string().nullish(),
   total: z.number().nullish(),
@@ -71,6 +84,7 @@ const expenseUpdateSchema = z.object({
   removedReceipts: z.array(z.string()).nullish(),
   actorName: z.string().nullish(),
   action: z.string().nullish(),
+  hasNewComments: z.boolean().nullish(),
   url: z.url(),
 });
 
@@ -112,6 +126,7 @@ const TITLES: Record<UpdateType, (update: ExpenseUpdate, description: string) =>
   odoo_action_blocked: ({ action }) =>
     `No pudimos ${BLOCKED_ACTIONS_FOR_ACTOR[action ?? ''] ?? 'completar tu acción en Odoo'}`,
   odoo_connection_still_invalid: () => 'La conexión con Odoo sigue sin funcionar',
+  expense_commented: (_, description) => `Tu gasto «${description}» tiene comentarios nuevos`,
 };
 
 const DETAILS: Record<UpdateType, (update: ExpenseUpdate, description: string) => string> = {
@@ -165,6 +180,8 @@ const DETAILS: Record<UpdateType, (update: ExpenseUpdate, description: string) =
     'La conexión de tu empresa con Odoo dejó de funcionar, así que por ahora el portal no puede comunicarse con Odoo. Ya avisamos al administrador; vuelve a intentarlo cuando la actualice.',
   odoo_connection_still_invalid: ({ actorName, action, connectionName }) =>
     `${actorName || 'Alguien'} intentó ${BLOCKED_ACTIONS_FOR_ADMIN[action ?? ''] ?? 'usar el portal'}, pero la API Key de la conexión «${connectionName ?? ''}» sigue sin servir. Mientras no la actualices, el portal no puede comunicarse con Odoo: los gastos que se envíen se quedan esperando y nadie puede actualizar sus estados. Genera una API Key nueva en Odoo y actualízala en la conexión del portal; lo pendiente se enviará solo.`,
+  expense_commented: () =>
+    'Escribieron en tu gasto desde Odoo. Ábrelo en el portal para leerlos y responder.',
 };
 
 const ACTION_LABELS: Partial<Record<UpdateType, string>> = {
@@ -173,6 +190,7 @@ const ACTION_LABELS: Partial<Record<UpdateType, string>> = {
   expense_send_stuck: 'Ver mis gastos',
   expense_submissions_stuck: 'Ver los envíos',
   odoo_action_blocked: 'Ir al portal',
+  expense_commented: 'Ver los comentarios',
 };
 
 const STATUS_LABELS: Record<Status, (update: ExpenseUpdate) => string> = {
@@ -202,7 +220,7 @@ function titleOf(update: ExpenseUpdate): string {
 
 function detailOf(update: ExpenseUpdate): string {
   const detail = DETAILS[update.type](update, update.expenseDescription || WITHOUT_DESCRIPTION);
-  return `${detail}${removedReceiptsOf(update)}`;
+  return `${detail}${removedReceiptsOf(update)}${newCommentsOf(update)}`;
 }
 
 function removedReceiptsOf({ type, removedReceipts }: ExpenseUpdate): string {
@@ -216,6 +234,11 @@ function removedReceiptsOf({ type, removedReceipts }: ExpenseUpdate): string {
     : ` ${removed}.`;
 }
 
+function newCommentsOf({ type, hasNewComments }: ExpenseUpdate): string {
+  if (!hasNewComments || type === 'expense_commented') return '';
+  return ' Además, tiene comentarios nuevos; ábrelo en el portal para leerlos.';
+}
+
 function amountOf({ total, currency }: ExpenseUpdate): string | null {
   if (total === null || total === undefined || !currency) return null;
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency }).format(total);
@@ -226,14 +249,17 @@ function actionLabelOf(update: ExpenseUpdate): string {
   return update.type === 'expense_send_delayed' && update.count ? 'Ver mis gastos' : 'Ver el gasto';
 }
 
+function scopeOf(updates: ExpenseUpdate[]): UpdatesScope {
+  if (!updates.every((update) => update.expenseId)) return 'portal';
+  return new Set(updates.map((update) => update.expenseId)).size === 1 ? 'expense' : 'expenses';
+}
+
 function subjectOf(updates: ExpenseUpdate[]): string {
   if (updates.length === 1) return titleOf(updates[0]);
-  const onlyExpenses = updates.every((update) =>
-    (EXPENSE_UPDATE_TYPES as readonly string[]).includes(update.type),
-  );
-  return onlyExpenses
-    ? `${updates.length} de tus gastos tienen novedades`
-    : `Tienes ${updates.length} avisos nuevos del Portal de Gastos`;
+  const scope = scopeOf(updates);
+  return scope === 'expense'
+    ? `${HEADINGS.expense} «${updates[0].expenseDescription || WITHOUT_DESCRIPTION}»`
+    : HEADINGS[scope];
 }
 
 export const expenseUpdatesEmail: EmailDefinition<z.infer<typeof expenseUpdatesSchema>> = {
@@ -242,8 +268,7 @@ export const expenseUpdatesEmail: EmailDefinition<z.infer<typeof expenseUpdatesS
   subject: ({ updates }) => subjectOf(updates),
   variables: (recipientName, { updates }) => ({
     recipientName,
-    count: String(updates.length),
-    single: updates.length === 1,
+    heading: HEADINGS[scopeOf(updates)],
     updates: updates.map((update) => ({
       title: titleOf(update),
       detail: detailOf(update),
