@@ -158,7 +158,7 @@ const DETAILS: Record<UpdateType, (update: ExpenseUpdate, description: string) =
     'Tu aprobador lo rechazó en Odoo. Un gasto rechazado ya no se puede corregir ni volver a enviar; si tienes dudas, consúltalo con tu aprobador.',
   expense_send_failed: ({ errorCode }) =>
     errorCode === RETRIES_EXHAUSTED_CODE
-      ? 'Intentamos enviarlo a Odoo durante 7 días sin lograr comunicarnos. El gasto regresó a borrador: revísalo y vuelve a enviarlo. Si vuelve a pasar, avísale a tu administrador.'
+      ? 'Intentamos enviarlo a Odoo durante 3 días sin lograr comunicarnos. El gasto regresó a borrador: revísalo y vuelve a enviarlo. Si vuelve a pasar, avísale a tu administrador.'
       : 'Odoo no aceptó tu gasto y regresó a borrador para que lo corrijas. Abre el gasto para ver el motivo, corrígelo y vuelve a enviarlo.',
   expense_send_delayed: ({ count }, description) => {
     if (!count) {
